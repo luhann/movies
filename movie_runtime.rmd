@@ -1,0 +1,301 @@
+---
+title: "Investigating IMDB Runtime"
+author: "Luke Hannan"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  rmarkdown::github_document:
+    html_preview: false
+    toc: true
+    toc_depth: 2
+# html_document:
+#   df_print: paged
+#   highlight: pygments
+#   code_folding: show
+#   toc: yes
+#   toc_float: TRUE
+knit: (
+  function(inputFile, encoding) { 
+  
+    rmarkdown::render( 
+      input       = inputFile, 
+      encoding    = encoding, 
+      output_file = "README") })
+---
+
+# Setup
+```{r setup, message = FALSE, warning = FALSE}
+library("knitr")
+knitr::opts_knit$set(dev = "svg", dev.args = list(type = "cairo", bg = "transparent"))
+knitr::opts_chunk$set(dev = "svg", dev.args = list(bg = "transparent"), dpi = 300, warning = FALSE)
+
+library("data.table")
+library("parallel")
+# for string manipulation
+library("stringr")
+# for plotting
+library("ggplot2")
+# for making better looking default ggplot themes
+library("ggthemes")
+# for more ggplot2 colour schemes
+library("colorspace")
+# for arranging facet plots
+library("cowplot")
+# for extra publication related things
+library("ggpubr")
+# lollipop plots; Author: https://github.com/hrbrmstr
+# I just can't install the proj package so I cant install ggalt which has the code for lollipop plots
+# so I have just copied that specific geom
+source("utils/geom_lollipop.r")
+
+```
+
+# Background
+
+I enjoy watching movies of all sorts, but the past couple of years I have found myself saying **"I enjoyed the movie, but I would have enjoyed it more if they cut a bit of stuff out"** quite a lot. I felt like the average runtime of movies had increased over the years. So I did what any reasonable person would do and looked at the data.
+
+## Data Sources
+All data was retrieved from IMDB website on 30-04-2022.
+
+https://datasets.imdbws.com/
+
+Data Documentation: http://www.imdb.com/interfaces/
+
+**title.basics.tsv.gz - Contains the following information for titles:**\
+    tconst (string) - alphanumeric unique identifier of the title\
+    titleType (string) – the type/format of the title (e.g. movie, short, tvseries, tvepisode, video, etc)\
+    primaryTitle (string) – the more popular title / the title used by the filmmakers on promotional materials at the point of release\
+    originalTitle (string) - original title, in the original language\
+    isAdult (boolean) - 0: non-adult title; 1: adult title\
+    startYear (YYYY) – represents the release year of a title. In the case of TV Series, it is the series start year\
+    endYear (YYYY) – TV Series end year. ‘\N’ for all other title types\
+    runtimeMinutes – primary runtime of the title, in minutes\
+    genres (string array) – includes up to three genres associated with the title\
+
+# Data Processing
+```{r data_ingest}
+
+# we check if the datafile exists if it does we carry on if it doesn't we download it
+# link for the datafiles: https://datasets.imdbws.com/title.basics.tsv.gz
+# I don't include it automatically because I don't want to track changes on the dataset or store it in the repo
+# If you want to rerun this document first download the data
+
+# The title.basics.tsv.gz file contains the runtime, title, and year of release' exactly what we are looking for
+movies = fread("data/title.basics.tsv.gz", sep = '\t', nThread = detectCores(), na.strings = c(",,", "\\N"))
+
+# convert runtime to numeric
+movies[, runtimeMinutes := as.numeric(runtimeMinutes)]
+movies[, startYear := as.numeric(startYear)]
+
+# Then only include movies that have runtimes
+movies = subset(movies, titleType == "movie" & !is.na(runtimeMinutes) & !is.na(startYear))
+# 367 883 movies that have runtimes
+nrow(movies)
+
+# First let us see the range of years we have to work with
+summary(movies$startYear, na.rm = TRUE)
+summary(movies$runtimeMinutes, na.rm = TRUE)
+hist(movies$runtimeMinutes)
+
+# some strange runtime and year values we will have to investigate and remove
+
+# lets see these movies with strange runtimes
+movies[runtimeMinutes >= 1000, ]
+
+# I'm not interested in any movies that have not been released so any movie that has a startYear after 2021
+# for now lets keep these runtimeMinutes outliers in, they wont change much and can always remove them later
+movies = subset(movies, startYear <= 2021 & startYear >= 1900)
+```
+# Overall Movies
+Below is a plot of the average run time for all movies in the database from the year 1900 to the year 2020.
+
+```{r overall, out.width = '100%', class.source = 'fold-hide'}
+ggplot(aes(x = startYear, y = mean_runtime, colour = n), data = movies[, .(mean_runtime = mean(runtimeMinutes), n = .N), by = startYear]) +
+  geom_line(size = 2, lineend = "round", linejoin = "mitre") +
+  geom_hline(alpha = 0.8, yintercept = 89.75, linetype = 2, size = 1.15, color = "darkgrey") +
+  scale_y_continuous(limits = c(0, 120), breaks = c(0, 30, 60, 90, 120), expand = c(0, 5)) +
+  scale_x_continuous(expand = c(0, 1)) +
+  scale_colour_gradient(
+    low = "#E7B800", high = "#FC4E07", breaks = c(0, 4000, 8000, 12000),
+    guide = guide_colorbar(title.position = "top", title.hjust = 0.05, nbin = 500, barheight = 0.45, barwidth = 8,
+    raster = TRUE)
+  ) +
+  labs(
+    x = "Year", y = "Mean Runtime (in Minutes)", colour = "Number of Movies", title = "Mean runtime for all movies from
+    1900 to 2020", subtitle = "Dotted line is overall mean runtime (89.75 min). Data from IMDB"
+    ) +
+  theme_minimal() +
+  theme(
+    legend.position = c(0.75, 0.25),
+    legend.direction = "horizontal",
+    panel.grid.minor = element_blank(),
+    text = element_text(size = 12),
+    axis.title.x = element_text(size = 12, face = "bold"),
+    axis.title.y = element_text(size = 12, face = "bold"),
+    axis.text.y = element_text(face = "bold"),
+    axis.text.x = element_text(face = "bold")
+  )
+```
+
+Lets zoom in real quick and only look at movies that have been released since I was born. Interestingly enough the line seems completely flat, lets throw in a pearsons correlation coefficient to see how flat it is. 
+```{r overall_slice, out.width = '100%', class.source = 'fold-hide'}
+ggplot(aes(x = startYear, y = mean_runtime, colour = n), data = movies[startYear >= 1994, .(mean_runtime = mean(runtimeMinutes), n = .N), by = startYear]) +
+  geom_line(size = 2, lineend = "round", linejoin = "mitre") +
+  geom_hline(alpha = 0.8, yintercept = 89.75, linetype = 2, size = 1.15, color = "darkgrey") +
+  scale_y_continuous(limits = c(0, 120), breaks = c(0, 30, 60, 90, 120), expand = c(0, 5)) +
+  scale_x_continuous(expand = c(0, 1)) +
+  scale_colour_gradient(
+    low = "#E7B800", high = "#FC4E07", breaks = c(0, 4000, 8000, 12000), guide = guide_colorbar(title.position = "top",
+    title.hjust = 0.05, nbin = 500, barheight = 0.45, barwidth = 8, raster = TRUE)
+  ) +
+  labs(
+    x = "Year", y = "Mean Runtime (in Minutes)", colour = "Number of Movies", title = "Mean runtime for all movies from
+    1994 to 2020", subtitle = "Dotted line is overall mean runtime (89.75 min). Data from IMDB"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = c(0.75, 0.25),
+    legend.direction = "horizontal",
+    panel.grid.minor = element_blank(),
+    text = element_text(size = 12),
+    axis.title.x = element_text(size = 12, face = "bold"),
+    axis.title.y = element_text(size = 12, face = "bold"),
+    axis.text.y = element_text(face = "bold"),
+    axis.text.x = element_text(face = "bold")
+  ) + stat_cor(aes(label = paste(..rr.label..)))
+
+```
+
+# Per Genre
+Now we produce the same plot as the overall plot above but for each genre in the dataset.
+
+```{r per_genre, out.width = "100%"}
+
+# The same plot but now for action movies
+action = ggplot(aes(x = startYear, y = mean_runtime, colour = n), data = movies[grepl("action", tolower(genres)), .(mean_runtime = mean(runtimeMinutes), n = .N), by = startYear]) +
+  geom_line(na.rm = TRUE, size = 1, lineend = "round", linejoin = "mitre") +
+  geom_hline(alpha = 0.8, yintercept = 89.75, linetype = 2, size = 1.15, color = "darkgrey") +
+  scale_y_continuous(limits = c(0, 280), breaks = c(0, 30, 60, 90, 120), expand = c(0, 5)) +
+  scale_x_continuous(expand = c(0, 1)) +
+  scale_colour_gradient(
+    low = "#E7B800", high = "#FC4E07",
+    guide = guide_colorbar(title.position = "top", title.hjust = 0.55, nbin = 500, barheight = 0.45, barwidth = 8,
+    raster = TRUE)
+  ) +
+  labs(x = "Year", y = "Mean Runtime (in Minutes)", colour = "Number of Movies", title = "Action movies") +
+  theme_minimal() +
+  theme(
+    legend.position = c(0.75, 0.15),
+    legend.direction = "horizontal",
+    panel.grid.minor = element_blank(),
+    text = element_text(size = 12),
+    axis.title.x = element_text(size = 12, face = "bold"),
+    axis.title.y = element_text(size = 12, face = "bold"),
+    axis.text.y = element_text(face = "bold"),
+    axis.text.x = element_text(face = "bold")
+  )
+
+
+# The same plot but now for romance movies
+romance = ggplot(aes(x = startYear, y = mean_runtime, colour = n), data = movies[grepl("romance", tolower(genres)), .(mean_runtime = mean(runtimeMinutes), n = .N), by = startYear]) +
+  geom_line(na.rm = TRUE, size = 1, lineend = "round", linejoin = "mitre") +
+  geom_hline(alpha = 0.8, yintercept = 89.75, linetype = 2, size = 1.15, color = "darkgrey") +
+  scale_y_continuous(limits = c(0, 120), breaks = c(0, 30, 60, 90, 120), expand = c(0, 5)) +
+  scale_x_continuous(expand = c(0, 1)) +
+  scale_colour_gradient(
+    low = "#E7B800", high = "#FC4E07", guide = guide_colorbar(title.position = "top", title.hjust = 0.55, nbin = 500,
+    barheight = 0.45, barwidth = 8, raster = TRUE)
+  ) +
+  labs(x = "Year", y = "Mean Runtime (in Minutes)", colour = "Number of Movies", title = "Romance movies") +
+  theme_minimal() +
+  theme(
+    legend.position = c(0.75, 0.15),
+    legend.direction = "horizontal",
+    panel.grid.minor = element_blank(),
+    text = element_text(size = 12),
+    axis.title.x = element_text(size = 12, face = "bold"),
+    axis.title.y = element_text(size = 12, face = "bold"),
+    axis.text.y = element_text(face = "bold"),
+    axis.text.x = element_text(face = "bold")
+  )
+
+# The same plot but now for drama movies
+drama = ggplot(aes(x = startYear, y = mean_runtime, colour = n), data = movies[grepl("drama", tolower(genres)), .(mean_runtime = mean(runtimeMinutes), n = .N), by = startYear]) +
+  geom_line(na.rm = TRUE, size = 1, lineend = "round", linejoin = "mitre") +
+  geom_hline(alpha = 0.8, yintercept = 89.75, linetype = 2, size = 1.15, color = "darkgrey") +
+  scale_y_continuous(limits = c(0, 120), breaks = c(0, 30, 60, 90, 120), expand = c(0, 5)) +
+  scale_x_continuous(expand = c(0, 1)) +
+  scale_colour_gradient(
+    low = "#E7B800", high = "#FC4E07", guide = guide_colorbar(title.position = "top", title.hjust = 0.55, nbin = 500,
+    barheight = 0.45, barwidth = 8, raster = TRUE)
+  ) +
+  labs(x = "Year", y = "Mean Runtime (in Minutes)", colour = "Number of Movies", title = "Drama movies") +
+  theme_minimal() +
+  theme(
+    legend.position = c(0.75, 0.15),
+    legend.direction = "horizontal",
+    panel.grid.minor = element_blank(),
+    text = element_text(size = 12),
+    axis.title.x = element_text(size = 12, face = "bold"),
+    axis.title.y = element_text(size = 12, face = "bold"),
+    axis.text.y = element_text(face = "bold"),
+    axis.text.x = element_text(face = "bold")
+  )
+
+
+plot_grid(action, drama, romance, nrow = 1, ncol = 3, scale = 0.95)
+
+```
+
+# Movies I Watched
+Now that we see that although movie runtime has trended upward since 1900, the runtime of movies that were released since I have been born has remained relatively flat. Thankfully I keep extensive records of movies I have watched (although record keeping only started around 2017), so we can check if movies **I have specifically watched** have increased in runtime over time.
+
+```{r personal_movies, out.width = '100%'}
+# I have already downloaded my ratings for all movies I have watched in json format
+library("jsonlite")
+movies_watched = fromJSON("data/movies.json")
+
+setDT(movies_watched)
+# convert runtime in minutes to numeric variables
+movies_watched$runtime = as.numeric(gsub(r"{\D}", "", movies_watched$runtime))
+
+# convert years to numeric dataset
+movies_watched$year = as.numeric(movies_watched$year)
+
+ggplot(aes(x = year, y = mean_runtime, colour = n), data = movies_watched[, .(mean_runtime = mean(runtime), n = .N), by = year]) +
+  geom_line(size = 2, lineend = "round", linejoin = "mitre") +
+  geom_hline(alpha = 0.8, yintercept = 121.1, linetype = 2, size = 1.15, color = "darkgrey") +
+  scale_y_continuous(limits = c(0, 180), breaks = c(0, 30, 60, 90, 120, 150, 180), expand = c(0, 5)) +
+  scale_x_continuous(expand = c(0, 1)) +
+  scale_colour_gradient(
+    low = "#E7B800", high = "#FC4E07", breaks = c(0, 4000, 8000, 12000),
+    guide = guide_colorbar(title.position = "top", title.hjust = 0.05, nbin = 500, barheight = 0.45, barwidth = 8,
+    raster = TRUE)
+  ) +
+  labs(
+    x = "Year", y = "Mean Runtime (in Minutes)", colour = "Number of Movies", title = "Mean runtime for all movies I
+    have watched", subtitle = "Dotted line is overall mean runtime (121.1 min). Data from Me"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = c(0.75, 0.25),
+    legend.direction = "horizontal",
+    panel.grid.minor = element_blank(),
+    text = element_text(size = 12),
+    axis.title.x = element_text(size = 12, face = "bold"),
+    axis.title.y = element_text(size = 12, face = "bold"),
+    axis.text.y = element_text(face = "bold"),
+    axis.text.x = element_text(face = "bold")
+  ) + stat_cor(aes(label = paste(..rr.label..)))
+
+```
+
+# Conclusion
+
+From all the figures it seems that movie runtime has slightly increased since 1900, and the runtime of movies I have
+watched has slightly increased over time but not noticeably.
+
+# Compute Environment
+
+```{r session_info}
+sessioninfo::session_info()
+```
