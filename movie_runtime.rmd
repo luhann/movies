@@ -80,7 +80,7 @@ Data Documentation: http://www.imdb.com/interfaces/
 # If you want to rerun this document first download the data
 
 # The title.basics.tsv.gz file contains the runtime, title, and year of release' exactly what we are looking for
-movies = fread("data/title.basics.tsv.gz", sep = '\t', nThread = detectCores(), na.strings = c(",,", "\\N"))
+movies = fread("data/title.basics.tsv.gz", sep = r"{\t}", nThread = detectCores(), na.strings = c(",,", r"{\N}"))
 
 # convert runtime to numeric
 movies[, runtimeMinutes := as.numeric(runtimeMinutes)]
@@ -89,7 +89,7 @@ movies[, startYear := as.numeric(startYear)]
 # Then only include movies that have runtimes
 movies = subset(movies, titleType == "movie" & !is.na(runtimeMinutes) & !is.na(startYear))
 # 367 883 movies that have runtimes
-nrow(movies)
+dim(movies)
 
 # First let us see the range of years we have to work with
 summary(movies$startYear, na.rm = TRUE)
@@ -116,13 +116,15 @@ ggplot(aes(x = startYear, y = mean_runtime, colour = n), data = movies[, .(mean_
   scale_x_continuous(expand = c(0, 1)) +
   scale_colour_gradient(
     low = "#E7B800", high = "#FC4E07", breaks = c(0, 4000, 8000, 12000),
-    guide = guide_colorbar(title.position = "top", title.hjust = 0.05, nbin = 500, barheight = 0.45, barwidth = 8,
-    raster = TRUE)
+    guide = guide_colorbar(
+      title.position = "top", title.hjust = 0.05, nbin = 500, barheight = 0.45, barwidth = 8,
+      raster = TRUE
+    )
   ) +
   labs(
     x = "Year", y = "Mean Runtime (in Minutes)", colour = "Number of Movies", title = "Mean runtime for all movies from
     1900 to 2020", subtitle = "Dotted line is overall mean runtime (89.75 min). Data from IMDB"
-    ) +
+  ) +
   theme_minimal() +
   theme(
     legend.position = c(0.75, 0.25),
@@ -144,8 +146,10 @@ ggplot(aes(x = startYear, y = mean_runtime, colour = n), data = movies[startYear
   scale_y_continuous(limits = c(0, 120), breaks = c(0, 30, 60, 90, 120), expand = c(0, 5)) +
   scale_x_continuous(expand = c(0, 1)) +
   scale_colour_gradient(
-    low = "#E7B800", high = "#FC4E07", breaks = c(0, 4000, 8000, 12000), guide = guide_colorbar(title.position = "top",
-    title.hjust = 0.05, nbin = 500, barheight = 0.45, barwidth = 8, raster = TRUE)
+    low = "#E7B800", high = "#FC4E07", breaks = c(0, 4000, 8000, 12000), guide = guide_colorbar(
+      title.position = "top",
+      title.hjust = 0.05, nbin = 500, barheight = 0.45, barwidth = 8, raster = TRUE
+    )
   ) +
   labs(
     x = "Year", y = "Mean Runtime (in Minutes)", colour = "Number of Movies", title = "Mean runtime for all movies from
@@ -161,7 +165,8 @@ ggplot(aes(x = startYear, y = mean_runtime, colour = n), data = movies[startYear
     axis.title.y = element_text(size = 12, face = "bold"),
     axis.text.y = element_text(face = "bold"),
     axis.text.x = element_text(face = "bold")
-  ) + stat_cor(aes(label = paste(..rr.label..)))
+  ) +
+  stat_cor(aes(label = paste(..rr.label..)))
 
 ```
 
@@ -169,7 +174,6 @@ ggplot(aes(x = startYear, y = mean_runtime, colour = n), data = movies[startYear
 Now we produce the same plot as the overall plot above but for each genre in the dataset.
 
 ```{r per_genre, out.width = "100%"}
-
 # The same plot but now for action movies
 action = ggplot(aes(x = startYear, y = mean_runtime, colour = n), data = movies[grepl("action", tolower(genres)), .(mean_runtime = mean(runtimeMinutes), n = .N), by = startYear]) +
   geom_line(na.rm = TRUE, size = 1, lineend = "round", linejoin = "mitre") +
@@ -178,8 +182,10 @@ action = ggplot(aes(x = startYear, y = mean_runtime, colour = n), data = movies[
   scale_x_continuous(expand = c(0, 1)) +
   scale_colour_gradient(
     low = "#E7B800", high = "#FC4E07",
-    guide = guide_colorbar(title.position = "top", title.hjust = 0.55, nbin = 500, barheight = 0.45, barwidth = 8,
-    raster = TRUE)
+    guide = guide_colorbar(
+      title.position = "top", title.hjust = 0.55, nbin = 500, barheight = 0.45, barwidth = 8,
+      raster = TRUE
+    )
   ) +
   labs(x = "Year", y = "Mean Runtime (in Minutes)", colour = "Number of Movies", title = "Action movies") +
   theme_minimal() +
@@ -194,7 +200,6 @@ action = ggplot(aes(x = startYear, y = mean_runtime, colour = n), data = movies[
     axis.text.x = element_text(face = "bold")
   )
 
-
 # The same plot but now for romance movies
 romance = ggplot(aes(x = startYear, y = mean_runtime, colour = n), data = movies[grepl("romance", tolower(genres)), .(mean_runtime = mean(runtimeMinutes), n = .N), by = startYear]) +
   geom_line(na.rm = TRUE, size = 1, lineend = "round", linejoin = "mitre") +
@@ -202,8 +207,10 @@ romance = ggplot(aes(x = startYear, y = mean_runtime, colour = n), data = movies
   scale_y_continuous(limits = c(0, 120), breaks = c(0, 30, 60, 90, 120), expand = c(0, 5)) +
   scale_x_continuous(expand = c(0, 1)) +
   scale_colour_gradient(
-    low = "#E7B800", high = "#FC4E07", guide = guide_colorbar(title.position = "top", title.hjust = 0.55, nbin = 500,
-    barheight = 0.45, barwidth = 8, raster = TRUE)
+    low = "#E7B800", high = "#FC4E07", guide = guide_colorbar(
+      title.position = "top", title.hjust = 0.55, nbin = 500,
+      barheight = 0.45, barwidth = 8, raster = TRUE
+    )
   ) +
   labs(x = "Year", y = "Mean Runtime (in Minutes)", colour = "Number of Movies", title = "Romance movies") +
   theme_minimal() +
@@ -217,7 +224,6 @@ romance = ggplot(aes(x = startYear, y = mean_runtime, colour = n), data = movies
     axis.text.y = element_text(face = "bold"),
     axis.text.x = element_text(face = "bold")
   )
-
 # The same plot but now for drama movies
 drama = ggplot(aes(x = startYear, y = mean_runtime, colour = n), data = movies[grepl("drama", tolower(genres)), .(mean_runtime = mean(runtimeMinutes), n = .N), by = startYear]) +
   geom_line(na.rm = TRUE, size = 1, lineend = "round", linejoin = "mitre") +
@@ -225,8 +231,10 @@ drama = ggplot(aes(x = startYear, y = mean_runtime, colour = n), data = movies[g
   scale_y_continuous(limits = c(0, 120), breaks = c(0, 30, 60, 90, 120), expand = c(0, 5)) +
   scale_x_continuous(expand = c(0, 1)) +
   scale_colour_gradient(
-    low = "#E7B800", high = "#FC4E07", guide = guide_colorbar(title.position = "top", title.hjust = 0.55, nbin = 500,
-    barheight = 0.45, barwidth = 8, raster = TRUE)
+    low = "#E7B800", high = "#FC4E07", guide = guide_colorbar(
+      title.position = "top", title.hjust = 0.55, nbin = 500,
+      barheight = 0.45, barwidth = 8, raster = TRUE
+    )
   ) +
   labs(x = "Year", y = "Mean Runtime (in Minutes)", colour = "Number of Movies", title = "Drama movies") +
   theme_minimal() +
@@ -268,8 +276,10 @@ ggplot(aes(x = year, y = mean_runtime, colour = n), data = movies_watched[, .(me
   scale_x_continuous(expand = c(0, 1)) +
   scale_colour_gradient(
     low = "#E7B800", high = "#FC4E07", breaks = c(0, 4000, 8000, 12000),
-    guide = guide_colorbar(title.position = "top", title.hjust = 0.05, nbin = 500, barheight = 0.45, barwidth = 8,
-    raster = TRUE)
+    guide = guide_colorbar(
+      title.position = "top", title.hjust = 0.05, nbin = 500, barheight = 0.45, barwidth = 8,
+      raster = TRUE
+    )
   ) +
   labs(
     x = "Year", y = "Mean Runtime (in Minutes)", colour = "Number of Movies", title = "Mean runtime for all movies I
@@ -285,7 +295,8 @@ ggplot(aes(x = year, y = mean_runtime, colour = n), data = movies_watched[, .(me
     axis.title.y = element_text(size = 12, face = "bold"),
     axis.text.y = element_text(face = "bold"),
     axis.text.x = element_text(face = "bold")
-  ) + stat_cor(aes(label = paste(..rr.label..)))
+  ) +
+  stat_cor(aes(label = paste(..rr.label..)))
 
 ```
 
