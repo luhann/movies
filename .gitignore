@@ -1,3 +1,4 @@
 data/*
 README_files
+__pycache__
 constants.py
